@@ -40,8 +40,8 @@ func (s *StandAloneStorage) Stop() error {
 }
 
 func (s *StandAloneStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, error) {
-	memReader, err := storage.NewMemStorage().Reader(ctx)
-	return memReader, err
+
+	return nil, nil
 }
 
 func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) error {
@@ -50,8 +50,5 @@ func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) 
 		wb.SetCF(modify.Cf(), modify.Key(), modify.Value())
 	}
 	err := s.engine.WriteKV(wb)
-	if err != nil {
-		log.Fatalf("StandAlone.Write, error: %v\n", err)
-	}
 	return err
 }
