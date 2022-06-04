@@ -1,7 +1,7 @@
 package standalone_storage
 
 import (
-	"github.com/Connor1996/badger"
+	"fmt"
 	"github.com/pingcap-incubator/tinykv/kv/config"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
@@ -21,13 +21,23 @@ type StandAloneStorage struct {
 func NewStandAloneStorage(conf *config.Config) *StandAloneStorage {
 	dbPath := conf.DBPath
 	kvPath := filepath.Join(dbPath, "kv")
+	raftPath := filepath.Join(dbPath, "raft")
 
-	os.MkdirAll(kvPath, os.ModePerm)
+	err := os.MkdirAll(kvPath, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
+	err = os.MkdirAll(raftPath, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
 
 	db := engine_util.CreateDB(kvPath, false)
-	engine := engine_util.NewEngines(db, nil, kvPath, "")
+	raftDB := engine_util.CreateDB(raftPath, true)
 
-	return &StandAloneStorage{engine: engine}
+	engine := engine_util.NewEngines(db, raftDB, kvPath, raftPath)
+
+	return &StandAloneStorage{engine: engine, conf: conf}
 }
 
 func (s *StandAloneStorage) Start() error {
@@ -46,16 +56,23 @@ func (s *StandAloneStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader,
 }
 
 func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) error {
-	wb := &engine_util.WriteBatch{}
+	var err error
+
 	for _, modify := range batch {
 		switch modify.Data.(type) {
 		case storage.Put:
-			wb.SetCF(modify.Cf(), modify.Key(), modify.Value())
+			put := modify.Data.(storage.Put)
+			err = engine_util.PutCF(s.engine.Kv, put.Cf, put.Key, put.Value)
 		case storage.Delete:
-			wb.DeleteMeta(modify.Key())
+			del := modify.Data.(storage.Delete)
+			err = engine_util.DeleteCF(s.engine.Kv, del.Cf, del.Key)
+		}
+
+		if err != nil {
+			fmt.Printf("StandAloneStorage Write Failed, %v", err)
 		}
 	}
-	err := s.engine.WriteKV(wb)
+
 	return err
 }
 
@@ -66,25 +83,17 @@ type StandAloneReader struct {
 
 // GetCF 通过CF 和 Key 获取Value
 func (s *StandAloneReader) GetCF(cf string, key []byte) ([]byte, error) {
-	var result *badger.Item
 	var err error
 
-	err = s.inner.engine.Kv.View(func(txn *badger.Txn) error {
-		result, err = txn.Get(key)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
+	val, err := engine_util.GetCF(s.inner.engine.Kv, cf, key)
 	if err != nil {
 		return nil, err
 	}
 
-	value, err := result.Value()
-	return value, nil
+	return val, nil
 }
 
-// 找到
+//
 func (s *StandAloneReader) IterCF(cf string) engine_util.DBIterator {
 	//TODO implement me
 	panic("implement me")
