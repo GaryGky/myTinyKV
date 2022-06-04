@@ -170,7 +170,7 @@ func (mr *memReader) IterCF(cf string) engine_util.DBIterator {
 	}
 
 	mr.iterCount += 1
-	min := data.Min()
+	min := data.Min() // 返回红黑树中的最小值 作为起始对象返回
 	if min == nil {
 		return &memIter{data, memItem{}, mr}
 	}

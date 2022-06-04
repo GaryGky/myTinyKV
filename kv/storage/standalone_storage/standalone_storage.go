@@ -40,15 +40,104 @@ func (s *StandAloneStorage) Stop() error {
 }
 
 func (s *StandAloneStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, error) {
-
-	return nil, nil
+	return &StandAloneReader{
+		inner:     s,
+		iterCount: 0,
+	}, nil
 }
 
 func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) error {
 	wb := &engine_util.WriteBatch{}
 	for _, modify := range batch {
-		wb.SetCF(modify.Cf(), modify.Key(), modify.Value())
+		switch modify.Data.(type) {
+		case storage.Put:
+			wb.SetCF(modify.Cf(), modify.Key(), modify.Value())
+		case storage.Delete:
+			wb.DeleteMeta(modify.Key())
+		}
 	}
 	err := s.engine.WriteKV(wb)
 	return err
+}
+
+type StandAloneReader struct {
+	inner     *StandAloneStorage
+	iterCount int
+}
+
+// GetCF 通过CF 和 Key 获取Value
+func (s *StandAloneReader) GetCF(cf string, key []byte) ([]byte, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+// 找到
+func (s *StandAloneReader) IterCF(cf string) engine_util.DBIterator {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *StandAloneReader) Close() {
+	//TODO implement me
+	panic("implement me")
+}
+
+type StandAloneIterator struct {
+	reader *StandAloneReader
+	item   *StandAloneItem
+}
+
+func (s StandAloneIterator) Item() engine_util.DBItem {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s StandAloneIterator) Valid() bool {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s StandAloneIterator) Next() {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s StandAloneIterator) Seek(bytes []byte) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s StandAloneIterator) Close() {
+	//TODO implement me
+	panic("implement me")
+}
+
+type StandAloneItem struct {
+	key   []byte
+	value []byte
+}
+
+func (s StandAloneItem) Key() []byte {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s StandAloneItem) KeyCopy(dst []byte) []byte {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s StandAloneItem) Value() ([]byte, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s StandAloneItem) ValueSize() int {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s StandAloneItem) ValueCopy(dst []byte) ([]byte, error) {
+	//TODO implement me
+	panic("implement me")
 }
