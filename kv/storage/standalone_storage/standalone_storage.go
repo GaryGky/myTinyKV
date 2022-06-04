@@ -2,6 +2,7 @@ package standalone_storage
 
 import (
 	"fmt"
+	"github.com/Connor1996/badger"
 	"github.com/pingcap-incubator/tinykv/kv/config"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
@@ -50,8 +51,7 @@ func (s *StandAloneStorage) Stop() error {
 
 func (s *StandAloneStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, error) {
 	return &StandAloneReader{
-		inner:     s,
-		iterCount: 0,
+		txn: s.engine.Kv.NewTransaction(false),
 	}, nil
 }
 
@@ -70,6 +70,7 @@ func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) 
 
 		if err != nil {
 			fmt.Printf("StandAloneStorage Write Failed, %v", err)
+			return err
 		}
 	}
 
@@ -77,89 +78,51 @@ func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) 
 }
 
 type StandAloneReader struct {
-	inner     *StandAloneStorage
-	iterCount int
+	txn *badger.Txn
 }
 
 // GetCF 通过CF 和 Key 获取Value
 func (s *StandAloneReader) GetCF(cf string, key []byte) ([]byte, error) {
 	var err error
 
-	val, err := engine_util.GetCF(s.inner.engine.Kv, cf, key)
-	if err != nil {
-		return nil, err
+	val, err := engine_util.GetCFFromTxn(s.txn, cf, key)
+
+	if err != nil && err == badger.ErrKeyNotFound {
+		return nil, nil
 	}
 
-	return val, nil
+	return val, err
 }
 
-//
+// IterCF 把所有cf 开头的Key都Get出来
 func (s *StandAloneReader) IterCF(cf string) engine_util.DBIterator {
-	//TODO implement me
-	panic("implement me")
+	return engine_util.NewCFIterator(cf, s.txn)
 }
 
 func (s *StandAloneReader) Close() {
-	//TODO implement me
-	panic("implement me")
+	s.txn.Discard()
 }
 
 type StandAloneIterator struct {
-	reader *StandAloneReader
-	item   *StandAloneItem
+	iter *engine_util.BadgerIterator
 }
 
 func (s StandAloneIterator) Item() engine_util.DBItem {
-	//TODO implement me
-	panic("implement me")
+	return s.iter.Item()
 }
 
 func (s StandAloneIterator) Valid() bool {
-	//TODO implement me
-	panic("implement me")
+	return s.iter.Valid()
 }
 
 func (s StandAloneIterator) Next() {
-	//TODO implement me
-	panic("implement me")
+	s.iter.Next()
 }
 
-func (s StandAloneIterator) Seek(bytes []byte) {
-	//TODO implement me
-	panic("implement me")
+func (s StandAloneIterator) Seek(key []byte) {
+	s.iter.Seek(key)
 }
 
 func (s StandAloneIterator) Close() {
-	//TODO implement me
-	panic("implement me")
-}
-
-type StandAloneItem struct {
-	key   []byte
-	value []byte
-}
-
-func (s StandAloneItem) Key() []byte {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s StandAloneItem) KeyCopy(dst []byte) []byte {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s StandAloneItem) Value() ([]byte, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s StandAloneItem) ValueSize() int {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s StandAloneItem) ValueCopy(dst []byte) ([]byte, error) {
-	//TODO implement me
-	panic("implement me")
+	s.iter.Close()
 }
