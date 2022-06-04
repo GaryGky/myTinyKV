@@ -6,26 +6,26 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
-	"log"
+	"os"
+	"path/filepath"
 )
 
 // StandAloneStorage is an implementation of `Storage` for a single-node TinyKV instance. It does not
 // communicate with other nodes and all data is stored locally.
 type StandAloneStorage struct {
 	engine *engine_util.Engines
+	conf   *config.Config
 }
 
 // NewStandAloneStorage 初始化一个数据库实例: In-memory True
 func NewStandAloneStorage(conf *config.Config) *StandAloneStorage {
-	db, err := badger.Open(badger.Options{
-		Dir:      conf.DBPath,
-		ValueDir: conf.DBPath,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+	dbPath := conf.DBPath
+	kvPath := filepath.Join(dbPath, "kv")
 
-	engine := engine_util.NewEngines(db, nil, conf.DBPath, "")
+	os.MkdirAll(kvPath, os.ModePerm)
+
+	db := engine_util.CreateDB(kvPath, false)
+	engine := engine_util.NewEngines(db, nil, kvPath, "")
 
 	return &StandAloneStorage{engine: engine}
 }
