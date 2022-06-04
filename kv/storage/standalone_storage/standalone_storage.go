@@ -17,9 +17,8 @@ type StandAloneStorage struct {
 
 // NewStandAloneStorage 初始化一个数据库实例: In-memory True
 func NewStandAloneStorage(conf *config.Config) *StandAloneStorage {
-	// Your Code Here (1).
 	db, err := badger.Open(badger.Options{
-		Dir:      conf.StoreAddr,
+		Dir:      conf.DBPath,
 		ValueDir: conf.DBPath,
 	})
 	if err != nil {
@@ -67,8 +66,22 @@ type StandAloneReader struct {
 
 // GetCF 通过CF 和 Key 获取Value
 func (s *StandAloneReader) GetCF(cf string, key []byte) ([]byte, error) {
-	//TODO implement me
-	panic("implement me")
+	var result *badger.Item
+	var err error
+
+	err = s.inner.engine.Kv.View(func(txn *badger.Txn) error {
+		result, err = txn.Get(key)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	value, err := result.Value()
+	return value, nil
 }
 
 // 找到

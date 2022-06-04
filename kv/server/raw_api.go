@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 )
 
@@ -10,21 +9,29 @@ import (
 // Some helper methods can be found in sever.go in the current directory
 
 // RawGet return the corresponding Get response based on RawGetRequest's CF and Key fields
-func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (*kvrpcpb.RawGetResponse, error) {
+func (server *Server) RawGet(ctx context.Context, req *kvrpcpb.RawGetRequest) (*kvrpcpb.RawGetResponse, error) {
+	reader, err := server.storage.Reader(nil)
+	if err != nil {
+		return nil, err
+	}
 
-	return nil, nil
+	val, err := reader.GetCF(req.GetCf(), req.GetKey())
+	if err != nil {
+		return &kvrpcpb.RawGetResponse{
+			Error:    err.Error(),
+			NotFound: true,
+		}, err
+	}
+
+	return &kvrpcpb.RawGetResponse{
+		Value: val,
+	}, nil
 }
 
 // RawPut puts the target data into storage and returns the corresponding response
 func (server *Server) RawPut(_ context.Context, req *kvrpcpb.RawPutRequest) (*kvrpcpb.RawPutResponse, error) {
 	// Your Code Here (1).
 	// Hint: Consider using Storage.Modify to store data to be modified
-	rawPut := storage.Put{
-		Key:   nil,
-		Value: nil,
-		Cf:    "",
-	}
-	modify := storage.Modify{}
 	return nil, nil
 }
 
