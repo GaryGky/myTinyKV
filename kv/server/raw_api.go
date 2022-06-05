@@ -76,7 +76,7 @@ func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*
 
 	resp := make([]*kvrpcpb.KvPair, 0)
 	cnt := uint32(0)
-	for iter.Seek([]byte(req.Cf)); iter.Valid() && cnt < req.Limit; iter.Next() {
+	for iter.Seek(req.StartKey); iter.Valid() && cnt < req.Limit; iter.Next() {
 		value, err := iter.Item().Value()
 		if err != nil {
 			log.Fatal("Server RawScan Scan CF Failed, ", err)
