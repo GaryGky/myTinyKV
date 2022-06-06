@@ -56,12 +56,12 @@ type Storage interface {
 	// FirstIndex is retained for matching purposes even though the
 	// rest of that entry may not be available.
 	Term(i uint64) (uint64, error)
-	// LastIndex returns the index of the last entry in the log.
+	// LastIndex returns the index of the last entry in the log.  // log中的最后一条命令
 	LastIndex() (uint64, error)
 	// FirstIndex returns the index of the first log entry that is
 	// possibly available via Entries (older entries have been incorporated
 	// into the latest Snapshot; if storage only contains the dummy entry the
-	// first log entry is not available).
+	// first log entry is not available). // first entry 表示第一条在log 中的command
 	FirstIndex() (uint64, error)
 	// Snapshot returns the most recent snapshot.
 	// If snapshot is temporarily unavailable, it should return ErrSnapshotTemporarilyUnavailable,

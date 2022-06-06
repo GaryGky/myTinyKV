@@ -740,8 +740,8 @@ func TestAllServerStepdown2AB(t *testing.T) {
 			if msgType == pb.MessageType_MsgRequestVote {
 				wlead = None
 			}
-			if sm.Lead != wlead {
-				t.Errorf("#%d, sm.Lead = %d, want %d", i, sm.Lead, wlead)
+			if sm.LeaderID != wlead {
+				t.Errorf("#%d, sm.LeaderID = %d, want %d", i, sm.LeaderID, wlead)
 			}
 		}
 	}
@@ -1089,8 +1089,8 @@ func TestRestoreFromSnapMsg2C(t *testing.T) {
 	sm := newTestRaft(2, []uint64{1, 2}, 10, 1, NewMemoryStorage())
 	sm.Step(m)
 
-	if sm.Lead != uint64(1) {
-		t.Errorf("sm.Lead = %d, want 1", sm.Lead)
+	if sm.LeaderID != uint64(1) {
+		t.Errorf("sm.LeaderID = %d, want 1", sm.LeaderID)
 	}
 }
 
@@ -1250,8 +1250,8 @@ func TestLeaderTransferToUpToDateNode3A(t *testing.T) {
 
 	lead := nt.peers[1].(*Raft)
 
-	if lead.Lead != 1 {
-		t.Fatalf("after election leader is %d, want 1", lead.Lead)
+	if lead.LeaderID != 1 {
+		t.Fatalf("after election leader is %d, want 1", lead.LeaderID)
 	}
 
 	// Transfer leadership to 2.
@@ -1278,8 +1278,8 @@ func TestLeaderTransferToUpToDateNodeFromFollower3A(t *testing.T) {
 
 	lead := nt.peers[1].(*Raft)
 
-	if lead.Lead != 1 {
-		t.Fatalf("after election leader is %d, want 1", lead.Lead)
+	if lead.LeaderID != 1 {
+		t.Fatalf("after election leader is %d, want 1", lead.LeaderID)
 	}
 
 	// Transfer leadership to 2.
@@ -1422,8 +1422,8 @@ func TestLeaderTransferSecondTransferToAnotherNode3A(t *testing.T) {
 }
 
 func checkLeaderTransferState(t *testing.T, r *Raft, state StateType, lead uint64) {
-	if r.State != state || r.Lead != lead {
-		t.Fatalf("after transferring, node has state %v lead %v, want state %v lead %v", r.State, r.Lead, state, lead)
+	if r.State != state || r.LeaderID != lead {
+		t.Fatalf("after transferring, node has state %v lead %v, want state %v lead %v", r.State, r.LeaderID, state, lead)
 	}
 }
 

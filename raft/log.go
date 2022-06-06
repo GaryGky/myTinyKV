@@ -14,7 +14,10 @@
 
 package raft
 
-import pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+import (
+	"github.com/pingcap-incubator/tinykv/log"
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+)
 
 // RaftLog manage the log entries, its struct look like:
 //
@@ -39,10 +42,10 @@ type RaftLog struct {
 
 	// log entries with index <= stabled are persisted to storage.
 	// It is used to record the logs that are not persisted by storage yet.
-	// Everytime handling `Ready`, the unstabled logs will be included.
+	// Everytime handling `Ready`, the unstable logs will be included.
 	stabled uint64
 
-	// all entries that have not yet compact.
+	// all entries that have not yet compact. 尚未被回收 (GC) 的Log
 	entries []pb.Entry
 
 	// the incoming unstable snapshot, if any.
@@ -56,7 +59,36 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-	return nil
+
+	hardState, _, err := storage.InitialState()
+	if err != nil {
+		log.Fatal("log.newLog failed, cannot initialize state: ", err)
+		return nil
+	}
+
+	/* TODO: 这里不是很确定 lo的取值, 因为不知道后续这里的entry需要怎么使用
+	目前的理解是 entries 就是DB未执行的指令 因此需要全部加载出来 */
+
+	lo, err := storage.FirstIndex()
+	if err != nil {
+		log.Fatal("log.newLog failed, cannot read firstIndex, ", err)
+		return nil
+	}
+
+	hi, err := storage.LastIndex()
+	if err != nil {
+		log.Fatal("log.newLog failed, cannot read lastIndex, ", err)
+		return nil
+	}
+
+	entries, err := storage.Entries(lo, hi)
+	return &RaftLog{
+		storage:   storage,
+		committed: hardState.Commit,
+		applied:   0,                // Applied 是已经被DB执行的指令 所以在recover之后
+		stabled:   hardState.Commit, // RaftNode recover 之后, Stabled这个状态应该就等于Commit
+		entries:   entries,
+	}
 }
 
 // We need to compact the log entries in some point of time like

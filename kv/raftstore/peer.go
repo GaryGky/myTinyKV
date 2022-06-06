@@ -257,7 +257,7 @@ func (p *peer) PeerId() uint64 {
 }
 
 func (p *peer) LeaderId() uint64 {
-	return p.RaftGroup.Raft.Lead
+	return p.RaftGroup.Raft.LeaderID
 }
 
 func (p *peer) IsLeader() bool {

@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
@@ -103,6 +104,8 @@ func (c *Config) validate() error {
 // Progress represents a follower’s progress in the view of the leader. Leader maintains
 // progresses of all followers, and sends entries to the follower based on its progress.
 type Progress struct {
+	// Match: log that latest matched with leader
+	// Next: next position that will be put log
 	Match, Next uint64
 }
 
@@ -115,7 +118,8 @@ type Raft struct {
 	// the log
 	RaftLog *RaftLog
 
-	// log replication progress of each peers
+	// Leader 维护的数据结构 // log replication progress of each peer
+	// peerID -> Progress
 	Prs map[uint64]*Progress
 
 	// this peer's role
@@ -128,7 +132,10 @@ type Raft struct {
 	msgs []pb.Message
 
 	// the leader id
-	Lead uint64
+	LeaderID uint64
+
+	// Timeout 表示经过多久触发某个事件
+	// Elapse 表示距离上一个TimeOut过去了多久
 
 	// heartbeat interval, should send
 	heartbeatTimeout int
@@ -163,8 +170,32 @@ func newRaft(c *Config) *Raft {
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
+
 	// Your Code Here (2A).
-	return nil
+
+	hardState, confState, err := c.Storage.InitialState()
+	if err != nil {
+		log.Fatal("raft.newRaft Failed, cannot inistialize state: ", err)
+		return nil
+	}
+
+	peerInfo := make(map[uint64]bool)
+	for _, node := range confState.Nodes {
+		peerInfo[node] = false
+	}
+
+	return &Raft{
+		id:               c.ID,
+		Term:             hardState.Term,
+		Vote:             hardState.Vote,
+		RaftLog:          newLog(c.Storage),
+		State:            StateFollower,
+		votes:            peerInfo,
+		msgs:             make([]pb.Message, 0),
+		LeaderID:         None,
+		heartbeatTimeout: c.HeartbeatTick,
+		electionTimeout:  c.ElectionTick,
+	}
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
