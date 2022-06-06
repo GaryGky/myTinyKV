@@ -214,27 +214,45 @@ func (r *Raft) sendHeartbeat(to uint64) {
 func (r *Raft) tick() {
 	// Your Code Here (2A).
 	r.heartbeatElapsed++
-	if r.State == StateLeader && r.heartbeatElapsed >= r.heartbeatTimeout {
-		r.msgs = append(r.msgs, pb.Message{
-			MsgType:  pb.MessageType_MsgHeartbeat,
-			To:       0, // 发送给所有的Follower
-			From:     r.id,
-			Term:     r.Term,
-			LogTerm:  0,
-			Index:    0,
-			Entries:  nil,
-			Commit:   0,
-			Snapshot: nil,
-			Reject:   false,
-		})
-	}
 	r.electionElapsed++
+
+	switch r.State {
+	case StateLeader:
+		if r.heartbeatElapsed >= r.heartbeatTimeout {
+			r.heartbeatElapsed = 0
+			heartBeatMsg := pb.Message{
+				MsgType: pb.MessageType_MsgHeartbeat,
+				// To:                   0, to everyone else
+				From: r.id,
+				Term: r.Term,
+			}
+			for u := range r.Prs {
+				heartBeatMsg.To = u
+				r.msgs = append(r.msgs, heartBeatMsg)
+			}
+		}
+	default:
+		if r.electionElapsed >= r.electionTimeout {
+			r.electionElapsed = 0
+			electionMsg := pb.Message{
+				MsgType: pb.MessageType_MsgHup,
+				// To:                   0,  to everyone else
+				From: r.id,
+				Term: r.Term,
+			}
+			for u := range r.Prs {
+				electionMsg.To = u
+				r.msgs = append(r.msgs, electionMsg)
+			}
+		}
+	}
 
 }
 
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
+
 }
 
 // becomeCandidate transform this peer's state to candidate
