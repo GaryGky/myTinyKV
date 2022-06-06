@@ -250,20 +250,42 @@ func (r *Raft) tick() {
 }
 
 // becomeFollower transform this peer's state to Follower
-func (r *Raft) becomeFollower(term uint64, lead uint64) {
-	// Your Code Here (2A).
-
+func (r *Raft) becomeFollower(term uint64, leaderID uint64) {
+	r.Term = term
+	r.LeaderID = leaderID
+	r.State = StateFollower
 }
 
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
-	// Your Code Here (2A).
+	r.State = StateCandidate
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
-	// NOTE: Leader should propose a noop entry on its term
+	r.State = StateLeader
+
+	noopMsg := pb.Message{
+		MsgType: pb.MessageType_MsgAppend,
+		//To:                   0, everyone
+		From:  r.id,
+		Term:  r.Term,
+		Index: r.RaftLog.LastIndex(),
+		Entries: []*pb.Entry{
+			{
+				EntryType: pb.EntryType_EntryNormal,
+				Term:      r.Term,
+				Index:     r.RaftLog.LastIndex(),
+				Data:      nil,
+			},
+		},
+	}
+
+	for u := range r.Prs {
+		noopMsg.To = u
+		r.msgs = append(r.msgs, noopMsg)
+	}
 }
 
 // Step the entrance of handle message, see `MessageType`
