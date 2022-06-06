@@ -213,6 +213,23 @@ func (r *Raft) sendHeartbeat(to uint64) {
 // tick advances the internal logical clock by a single tick.
 func (r *Raft) tick() {
 	// Your Code Here (2A).
+	r.heartbeatElapsed++
+	if r.State == StateLeader && r.heartbeatElapsed >= r.heartbeatTimeout {
+		r.msgs = append(r.msgs, pb.Message{
+			MsgType:  pb.MessageType_MsgHeartbeat,
+			To:       0, // 发送给所有的Follower
+			From:     r.id,
+			Term:     r.Term,
+			LogTerm:  0,
+			Index:    0,
+			Entries:  nil,
+			Commit:   0,
+			Snapshot: nil,
+			Reject:   false,
+		})
+	}
+	r.electionElapsed++
+
 }
 
 // becomeFollower transform this peer's state to Follower
