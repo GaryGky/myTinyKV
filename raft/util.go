@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"sort"
@@ -101,7 +102,7 @@ func mustTemp(pre, body string) string {
 	return f.Name()
 }
 
-func ltoa(l *RaftLog) string {
+func logToString(l *RaftLog) string {
 	s := fmt.Sprintf("committed: %d\n", l.committed)
 	s += fmt.Sprintf("applied:  %d\n", l.applied)
 	for i, e := range l.entries {
@@ -128,12 +129,16 @@ func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
 
-func buildElectionRequest(from, term uint64, peers []uint64, log RaftLog) (ans []pb.Message) {
+func buildElectionRequest(from, term uint64, peers []uint64, raftLog *RaftLog) (ans []pb.Message) {
+	lastIndex, committed, lastLogTerm := parseRaftLogIndex(raftLog)
+
 	message := pb.Message{
 		MsgType: pb.MessageType_MsgRequestVote,
 		From:    from,
 		Term:    term,
-		LogTerm: log.Term(),
+		Index:   lastIndex,
+		Commit:  committed,
+		LogTerm: lastLogTerm,
 	}
 	for _, peer := range peers {
 		message.To = peer
@@ -142,9 +147,13 @@ func buildElectionRequest(from, term uint64, peers []uint64, log RaftLog) (ans [
 	return
 }
 
-func keySet(peers map[uint64]*Progress) (keys []uint64) {
-	for k, _ := range peers {
-		keys = append(keys, k)
+func parseRaftLogIndex(raftLog *RaftLog) (uint64, uint64, uint64) {
+	lastIndex := raftLog.LastIndex()
+	committed := raftLog.committed
+	lastLogTerm, err := raftLog.Term(lastIndex)
+	if err != nil {
+		log.Fatal("util.buildElectionRequest Failed, err: ", err)
 	}
-	return
+
+	return lastIndex, committed, lastLogTerm
 }

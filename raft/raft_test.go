@@ -428,9 +428,9 @@ func TestDuelingCandidates2AB(t *testing.T) {
 		if g := tt.sm.Term; g != tt.term {
 			t.Errorf("#%d: term = %d, want %d", i, g, tt.term)
 		}
-		base := ltoa(tt.raftLog)
+		base := logToString(tt.raftLog)
 		if sm, ok := nt.peers[1+uint64(i)].(*Raft); ok {
-			l := ltoa(sm.RaftLog)
+			l := logToString(sm.RaftLog)
 			if g := diffu(base, l); g != "" {
 				t.Errorf("#%d: diff:\n%s", i, g)
 			}
@@ -467,10 +467,10 @@ func TestCandidateConcede2AB(t *testing.T) {
 	}
 	wlog := newLog(newMemoryStorageWithEnts([]pb.Entry{{}, {Data: nil, Term: 1, Index: 1}, {Term: 1, Index: 2, Data: data}}))
 	wlog.committed = 2
-	wantLog := ltoa(wlog)
+	wantLog := logToString(wlog)
 	for i, p := range tt.peers {
 		if sm, ok := p.(*Raft); ok {
-			l := ltoa(sm.RaftLog)
+			l := logToString(sm.RaftLog)
 			if g := diffu(wantLog, l); g != "" {
 				t.Errorf("#%d: diff:\n%s", i, g)
 			}
@@ -508,10 +508,10 @@ func TestOldMessages2AB(t *testing.T) {
 			{Data: []byte("somedata"), Term: 3, Index: 4},
 		}))
 	ilog.committed = 4
-	base := ltoa(ilog)
+	base := logToString(ilog)
 	for i, p := range tt.peers {
 		if sm, ok := p.(*Raft); ok {
-			l := ltoa(sm.RaftLog)
+			l := logToString(sm.RaftLog)
 			if g := diffu(base, l); g != "" {
 				t.Errorf("#%d: diff:\n%s", i, g)
 			}
@@ -545,10 +545,10 @@ func TestProposal2AB(t *testing.T) {
 			wantLog = newLog(newMemoryStorageWithEnts([]pb.Entry{{}, {Data: nil, Term: 1, Index: 1}, {Term: 1, Index: 2, Data: data}}))
 			wantLog.committed = 2
 		}
-		base := ltoa(wantLog)
+		base := logToString(wantLog)
 		for i, p := range tt.peers {
 			if sm, ok := p.(*Raft); ok {
-				l := ltoa(sm.RaftLog)
+				l := logToString(sm.RaftLog)
 				if g := diffu(base, l); g != "" {
 					t.Errorf("#%d: diff:\n%s", i, g)
 				}

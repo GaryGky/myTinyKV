@@ -297,7 +297,7 @@ func (r *Raft) Step(m pb.Message) error {
 		switch m.MsgType {
 		// Follower 变成Candidate 并发起投票请求
 		case pb.MessageType_MsgHup:
-			r.msgs = buildElectionRequest(r.id, r.Term, keySet(r.Prs), r.RaftLog)
+			r.msgs = buildElectionRequest(r.id, r.Term, nodes(r), r.RaftLog)
 			return nil
 		// 收到candidate的Vote请求
 		case pb.MessageType_MsgRequestVote:
@@ -360,4 +360,41 @@ func (r *Raft) addNode(id uint64) {
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
+}
+
+func (r *Raft) handleRequestVote(m pb.Message) (pb.Message, error) {
+	lastIndex, committed, lastLogTerm := parseRaftLogIndex(r.RaftLog)
+
+	resp := pb.Message{
+		MsgType: pb.MessageType_MsgRequestVoteResponse,
+		To:      m.From,
+		From:    r.id,
+		Term:    r.Term,
+		LogTerm: lastLogTerm,
+		Index:   lastIndex,
+		Commit:  committed,
+	}
+
+	// 拒绝投票的情况
+	if r.Term > m.Term {
+		resp.Reject = true
+		return resp, nil
+	}
+	if r.Term == m.Term && r.Vote != m.From {
+		resp.Reject = true
+		return resp, nil
+	}
+
+	// 判断本地日志是否大于Candidate的日志
+	if r.RaftLog.committed > committed {
+		resp.Reject = true
+		return resp, nil
+	}
+
+	// 投票给发送消息过来的 Candidate
+	r.Vote = m.From
+	r.Term = m.Term
+
+	resp.Reject = false
+	return resp, nil
 }
