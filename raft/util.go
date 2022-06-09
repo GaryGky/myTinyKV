@@ -127,3 +127,24 @@ func IsResponseMsg(msgt pb.MessageType) bool {
 func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
+
+func buildElectionRequest(from, term uint64, peers []uint64, log RaftLog) (ans []pb.Message) {
+	message := pb.Message{
+		MsgType: pb.MessageType_MsgRequestVote,
+		From:    from,
+		Term:    term,
+		LogTerm: log.Term(),
+	}
+	for _, peer := range peers {
+		message.To = peer
+		ans = append(ans, message)
+	}
+	return
+}
+
+func keySet(peers map[uint64]*Progress) (keys []uint64) {
+	for k, _ := range peers {
+		keys = append(keys, k)
+	}
+	return
+}

@@ -294,8 +294,45 @@ func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 	switch r.State {
 	case StateFollower:
+		switch m.MsgType {
+		// Follower 变成Candidate 并发起投票请求
+		case pb.MessageType_MsgHup:
+			r.msgs = buildElectionRequest(r.id, r.Term, keySet(r.Prs), r.RaftLog)
+			return nil
+		// 收到candidate的Vote请求
+		case pb.MessageType_MsgRequestVote:
+			return nil
+		// 收到Leader的心跳请求
+		case pb.MessageType_MsgHeartbeat:
+			return nil
+		// 收到Leader的AppendEntry请求
+		case pb.MessageType_MsgAppend:
+			return nil
+		}
 	case StateCandidate:
+		switch m.MsgType {
+		// 自己投自己
+		case pb.MessageType_MsgHup:
+			return nil
+		// 有Leader已经当选
+		case pb.MessageType_MsgAppend:
+			return nil
+		// 收到Follower的投票结果
+		case pb.MessageType_MsgRequestVoteResponse:
+			return nil
+		}
 	case StateLeader:
+		switch m.MsgType {
+		// 收到另一个Leader的Append请求 -> 脑裂heal之后有可能发生
+		case pb.MessageType_MsgAppend:
+			return nil
+		// 收到Follower的Propose请求
+		case pb.MessageType_MsgPropose:
+			return nil
+		// Leader发给自己 提醒要发送心跳了
+		case pb.MessageType_MsgBeat:
+			return nil
+		}
 	}
 	return nil
 }
