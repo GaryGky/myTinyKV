@@ -110,6 +110,8 @@ type Progress struct {
 	Match, Next uint64
 }
 
+type stepFunc func(r *Raft, m pb.Message) error
+
 type Raft struct {
 	id uint64
 
@@ -149,6 +151,8 @@ type Raft struct {
 	// Number of ticks since it reached last electionTimeout or received a
 	// valid message from current leader when it is a follower.
 	electionElapsed int
+
+	stepFunc stepFunc
 
 	// leadTransferee is id of the leader transfer target when its value is not zero.
 	// Follow the procedure defined in section 3.10 of Raft phd thesis.
@@ -243,16 +247,19 @@ func (r *Raft) becomeFollower(term uint64, leaderID uint64) {
 	r.Term = term
 	r.LeaderID = leaderID
 	r.State = StateFollower
+	r.stepFunc = stepFuncFollower
 }
 
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	r.State = StateCandidate
+	r.stepFunc = stepFuncCandidate
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	r.State = StateLeader
+	r.stepFunc = stepFuncLeader
 
 	noopMsg := pb.Message{
 		MsgType: pb.MessageType_MsgAppend,
@@ -280,52 +287,7 @@ func (r *Raft) becomeLeader() {
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
-	switch r.State {
-	case StateFollower:
-		switch m.MsgType {
-		// Follower 变成Candidate 并发起投票请求
-		case pb.MessageType_MsgHup:
-			r.msgs = buildElectionRequest(r.id, r.Term, nodes(r), r.RaftLog)
-			return nil
-		// 收到candidate的Vote请求
-		case pb.MessageType_MsgRequestVote:
-			r.handleRequestVote(m)
-			return nil
-		// 收到Leader的心跳请求
-		case pb.MessageType_MsgHeartbeat:
-			return r.handleHeartBeat(m)
-		// 收到 Leader 的AppendEntry请求
-		case pb.MessageType_MsgAppend:
-			r.handleAppendEntries(m)
-			return nil
-		}
-	case StateCandidate:
-		switch m.MsgType {
-		// 自己投自己
-		case pb.MessageType_MsgHup:
-			return nil
-		// 有Leader已经当选
-		case pb.MessageType_MsgAppend:
-			r.handleAppendEntries(m)
-			return nil
-		// 收到Follower的投票结果
-		case pb.MessageType_MsgRequestVoteResponse:
-			return nil
-		}
-	case StateLeader:
-		switch m.MsgType {
-		// 收到另一个Leader的Append请求 -> 脑裂heal之后有可能发生
-		case pb.MessageType_MsgAppend:
-			return nil
-		// 收到Follower的Propose请求
-		case pb.MessageType_MsgPropose:
-			return nil
-		// Leader发给自己 提醒要发送心跳了
-		case pb.MessageType_MsgBeat:
-			return nil
-		}
-	}
-	return nil
+	return r.stepFunc(r, m)
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -450,4 +412,56 @@ func (r *Raft) send(m pb.Message) {
 		}
 	}
 	r.msgs = append(r.msgs, m)
+}
+
+func stepFuncLeader(r *Raft, m pb.Message) error {
+	switch m.MsgType {
+	// 收到另一个Leader的Append请求 -> 脑裂heal之后有可能发生
+	case pb.MessageType_MsgAppend:
+		return nil
+	// 收到Follower的Propose请求
+	case pb.MessageType_MsgPropose:
+		return nil
+	// Leader发给自己 提醒要发送心跳了
+	case pb.MessageType_MsgBeat:
+		return nil
+	}
+	return nil
+}
+
+func stepFuncCandidate(r *Raft, m pb.Message) error {
+	switch m.MsgType {
+	// 自己投自己
+	case pb.MessageType_MsgHup:
+		return nil
+		// 有Leader已经当选
+	case pb.MessageType_MsgAppend:
+		r.handleAppendEntries(m)
+		return nil
+		// 收到Follower的投票结果
+	case pb.MessageType_MsgRequestVoteResponse:
+		return nil
+	}
+	return nil
+}
+
+func stepFuncFollower(r *Raft, m pb.Message) error {
+	switch m.MsgType {
+	// Follower 变成Candidate 并发起投票请求
+	case pb.MessageType_MsgHup:
+		r.msgs = buildElectionRequest(r.id, r.Term, nodes(r), r.RaftLog)
+		return nil
+	// 收到candidate的Vote请求
+	case pb.MessageType_MsgRequestVote:
+		r.handleRequestVote(m)
+		return nil
+	// 收到Leader的心跳请求
+	case pb.MessageType_MsgHeartbeat:
+		return r.handleHeartBeat(m)
+	// 收到 Leader 的AppendEntry请求
+	case pb.MessageType_MsgAppend:
+		r.handleAppendEntries(m)
+		return nil
+	}
+	return nil
 }
