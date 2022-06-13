@@ -104,8 +104,8 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 	return nil
 }
 
-// nextEnts returns all the committed but not applied entries
-func (l *RaftLog) nextEnts() (ents []pb.Entry) {
+// AllUnstableEntries returns all the committed but not applied entries
+func (l *RaftLog) AllUnstableEntries() (entries []pb.Entry) {
 	// Your Code Here (2A).
 	return nil
 }

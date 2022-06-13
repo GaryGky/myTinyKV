@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -198,16 +199,11 @@ func newRaft(c *Config) *Raft {
 	}
 }
 
-// sendAppend sends an append RPC with new entries (if any) and the
+// sendAppend sends an AppendRPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
 	return false
-}
-
-// sendHeartbeat sends a heartbeat RPC to the given peer.
-func (r *Raft) sendHeartbeat(to uint64) {
-	// Your Code Here (2A).
 }
 
 // tick advances the internal logical clock by a single tick.
@@ -220,15 +216,8 @@ func (r *Raft) tick() {
 	case StateLeader:
 		if r.heartbeatElapsed >= r.heartbeatTimeout {
 			r.heartbeatElapsed = 0
-			heartBeatMsg := pb.Message{
-				MsgType: pb.MessageType_MsgHeartbeat,
-				// To:                   0, to everyone else
-				From: r.id,
-				Term: r.Term,
-			}
 			for u := range r.Prs {
-				heartBeatMsg.To = u
-				r.msgs = append(r.msgs, heartBeatMsg)
+				r.sendHeartbeat(u)
 			}
 		}
 	default:
@@ -242,7 +231,7 @@ func (r *Raft) tick() {
 			}
 			for u := range r.Prs {
 				electionMsg.To = u
-				r.msgs = append(r.msgs, electionMsg)
+				r.send(electionMsg)
 			}
 		}
 	}
@@ -263,12 +252,11 @@ func (r *Raft) becomeCandidate() {
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
-	// Your Code Here (2A).
 	r.State = StateLeader
 
 	noopMsg := pb.Message{
 		MsgType: pb.MessageType_MsgAppend,
-		//To:                   0, everyone
+		//To:                   0, // to everyone
 		From:  r.id,
 		Term:  r.Term,
 		Index: r.RaftLog.LastIndex(),
@@ -284,7 +272,7 @@ func (r *Raft) becomeLeader() {
 
 	for u := range r.Prs {
 		noopMsg.To = u
-		r.msgs = append(r.msgs, noopMsg)
+		r.send(noopMsg)
 	}
 }
 
@@ -301,12 +289,14 @@ func (r *Raft) Step(m pb.Message) error {
 			return nil
 		// 收到candidate的Vote请求
 		case pb.MessageType_MsgRequestVote:
+			r.handleRequestVote(m)
 			return nil
 		// 收到Leader的心跳请求
 		case pb.MessageType_MsgHeartbeat:
-			return nil
-		// 收到Leader的AppendEntry请求
+			return r.handleHeartBeat(m)
+		// 收到 Leader 的AppendEntry请求
 		case pb.MessageType_MsgAppend:
+			r.handleAppendEntries(m)
 			return nil
 		}
 	case StateCandidate:
@@ -316,6 +306,7 @@ func (r *Raft) Step(m pb.Message) error {
 			return nil
 		// 有Leader已经当选
 		case pb.MessageType_MsgAppend:
+			r.handleAppendEntries(m)
 			return nil
 		// 收到Follower的投票结果
 		case pb.MessageType_MsgRequestVoteResponse:
@@ -339,12 +330,52 @@ func (r *Raft) Step(m pb.Message) error {
 
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
-	// Your Code Here (2A).
+	switch r.State {
+	case StateFollower:
+		// 判断是否要接下这条AppendEntry 消息
+		if m.From == r.LeaderID {
+			r.RaftLog.entries = append(r.RaftLog.entries, *m.Entries[0])
+			lastIndex, committed, lastLogTerm := parseRaftLogIndex(r.RaftLog)
+			r.send(pb.Message{
+				MsgType: pb.MessageType_MsgAppendResponse,
+				To:      m.From,
+				From:    r.id,
+				Term:    r.Term,
+				LogTerm: lastLogTerm,
+				Index:   lastIndex,
+				Commit:  committed,
+			})
+		} else {
+			// TODO: Reject
+		}
+	case StateCandidate:
+		if m.Term > r.Term {
+			r.becomeFollower(m.Term, m.From)
+		}
+	case StateLeader:
+		if m.Term > r.Term {
+			r.becomeFollower(m.Term, m.From)
+		}
+	}
 }
 
 // handleHeartbeat handle Heartbeat RPC request
-func (r *Raft) handleHeartbeat(m pb.Message) {
-	// Your Code Here (2A).
+// sendHeartbeat sends a heartbeat RPC to the given peer.
+func (r *Raft) sendHeartbeat(to uint64) {
+	// Attach the commit as min(to.matched, r.committed).
+	// When the leader sends out heartbeat message,
+	// the receiver(follower) might not be matched with the leader,
+	// or it might not have all the committed entries.
+	// The leader MUST NOT forward the follower's commit to
+	// an unmatched index.
+	commit := min(r.Prs[to].Match, r.RaftLog.committed)
+	m := pb.Message{
+		To:      to,
+		MsgType: pb.MessageType_MsgHeartbeat,
+		Commit:  commit,
+	}
+
+	r.send(m)
 }
 
 // handleSnapshot handle Snapshot RPC request
@@ -362,7 +393,7 @@ func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
 }
 
-func (r *Raft) handleRequestVote(m pb.Message) (pb.Message, error) {
+func (r *Raft) handleRequestVote(m pb.Message) {
 	lastIndex, committed, lastLogTerm := parseRaftLogIndex(r.RaftLog)
 
 	resp := pb.Message{
@@ -378,17 +409,14 @@ func (r *Raft) handleRequestVote(m pb.Message) (pb.Message, error) {
 	// 拒绝投票的情况
 	if r.Term > m.Term {
 		resp.Reject = true
-		return resp, nil
 	}
 	if r.Term == m.Term && r.Vote != m.From {
 		resp.Reject = true
-		return resp, nil
 	}
 
 	// 判断本地日志是否大于Candidate的日志
 	if r.RaftLog.committed > committed {
 		resp.Reject = true
-		return resp, nil
 	}
 
 	// 投票给发送消息过来的 Candidate
@@ -396,5 +424,30 @@ func (r *Raft) handleRequestVote(m pb.Message) (pb.Message, error) {
 	r.Term = m.Term
 
 	resp.Reject = false
-	return resp, nil
+	r.send(resp)
+}
+
+func (r *Raft) handleHeartBeat(m pb.Message) error {
+	if r.LeaderID == m.From {
+		r.electionElapsed = 0
+	}
+	return nil
+}
+
+// send schedules persisting state to a stable storage and AFTER that
+// sending the message (as part of next Ready message processing).
+func (r *Raft) send(m pb.Message) {
+	if m.From == None {
+		m.From = r.id
+	}
+	if m.MsgType == pb.MessageType_MsgRequestVote || m.MsgType == pb.MessageType_MsgRequestVoteResponse {
+		if m.Term == 0 {
+			panic(fmt.Sprintf("term should be set when sending %s", m.MsgType))
+		}
+	} else {
+		if m.Term != 0 {
+			panic(fmt.Sprintf("term should not be set when sending %s (was %d)", m.MsgType, m.Term))
+		}
+	}
+	r.msgs = append(r.msgs, m)
 }
