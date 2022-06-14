@@ -269,9 +269,25 @@ func (r *Raft) tick() {
 
 }
 
+func (r *Raft) reset(term uint64) {
+	if r.Term != term {
+		r.Term = term
+		r.Vote = None
+	}
+	r.LeaderID = None
+
+	r.electionElapsed = 0
+	r.heartbeatElapsed = 0
+	// r.resetRandomizedElectionTimeout()
+
+	// r.abortLeaderTransfer()
+
+	r.Prs = make(map[uint64]*Progress)
+}
+
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, leaderID uint64) {
-	r.Term = term
+	r.reset(term)
 	r.LeaderID = leaderID
 	r.State = StateFollower
 	r.stepFunc = stepFuncFollower
@@ -281,12 +297,15 @@ func (r *Raft) becomeFollower(term uint64, leaderID uint64) {
 func (r *Raft) becomeCandidate() {
 	r.State = StateCandidate
 	r.stepFunc = stepFuncCandidate
+	r.Vote = r.id
+	r.reset(r.Term + 1)
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 	r.stepFunc = stepFuncLeader
+	r.reset(r.Term)
 	r.broadcast(pb.Message{
 		MsgType: pb.MessageType_MsgAppend,
 		From:    r.id,
@@ -308,7 +327,7 @@ func (r *Raft) maySendAppend(to uint64, sendIfEmpty bool) bool {
 	m.To = to
 
 	term, errT := r.RaftLog.Term(pr.Next - 1)
-	entries := r.RaftLog.entries[pr.Next : r.RaftLog.LastIndex()+1]
+	entries := r.RaftLog.entries[pr.Next:r.RaftLog.LastIndex()]
 	if len(entries) == 0 && !sendIfEmpty {
 		return false
 	}
@@ -321,6 +340,7 @@ func (r *Raft) maySendAppend(to uint64, sendIfEmpty bool) bool {
 	m.MsgType = pb.MessageType_MsgAppend
 	m.Index = pr.Next - 1
 	m.LogTerm = term
+	m.Term = r.Term
 	m.Entries = ConvertEntryArrToEntryPntArr(entries)
 	m.Commit = r.RaftLog.committed
 	r.send(m)
@@ -441,6 +461,11 @@ func (r *Raft) handlePropose(m pb.Message) error {
 // helper function
 func (r *Raft) appendEntry(entries ...pb.Entry) (accepted bool) {
 	lastIndex := r.RaftLog.LastIndex()
+	// 修正 RaftLog 为空的情况
+	if len(r.RaftLog.entries) == 0 {
+		lastIndex--
+	}
+
 	for i := range entries {
 		entries[i].Term = r.Term
 		entries[i].Index = lastIndex + uint64(1+i)
@@ -457,7 +482,7 @@ func stepFuncLeader(r *Raft, m pb.Message) error {
 		return nil
 	// 收到Follower的Propose请求
 	case pb.MessageType_MsgPropose:
-
+		r.handlePropose(m)
 		return nil
 	// Leader发给自己 提醒要发送心跳了
 	case pb.MessageType_MsgBeat:
