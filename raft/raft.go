@@ -282,7 +282,9 @@ func (r *Raft) reset(term uint64) {
 
 	// r.abortLeaderTransfer()
 
-	r.Prs = make(map[uint64]*Progress)
+	for id := range r.votes {
+		r.votes[id] = false
+	}
 }
 
 // becomeFollower transform this peer's state to Follower
@@ -306,6 +308,7 @@ func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 	r.stepFunc = stepFuncLeader
 	r.reset(r.Term)
+	// 发一条noop消息
 	r.broadcast(pb.Message{
 		MsgType: pb.MessageType_MsgAppend,
 		From:    r.id,
@@ -340,7 +343,7 @@ func (r *Raft) maySendAppend(to uint64, sendIfEmpty bool) bool {
 	m.MsgType = pb.MessageType_MsgAppend
 	m.Index = pr.Next - 1
 	m.LogTerm = term
-	m.Term = r.Term
+	m.Term = term
 	m.Entries = ConvertEntryArrToEntryPntArr(entries)
 	m.Commit = r.RaftLog.committed
 	r.send(m)
@@ -350,15 +353,6 @@ func (r *Raft) maySendAppend(to uint64, sendIfEmpty bool) bool {
 func (r *Raft) send(m pb.Message) {
 	if m.From == None {
 		m.From = r.id
-	}
-	if m.MsgType == pb.MessageType_MsgRequestVote || m.MsgType == pb.MessageType_MsgRequestVoteResponse {
-		if m.Term == 0 {
-			panic(fmt.Sprintf("term should be set when sending %s", m.MsgType))
-		}
-	} else {
-		if m.Term != 0 {
-			panic(fmt.Sprintf("term should not be set when sending %s (was %d)", m.MsgType, m.Term))
-		}
 	}
 	if r.id == m.To {
 		r.Step(m)
@@ -441,6 +435,7 @@ func (r *Raft) handleHeartBeat(m pb.Message) {
 		r.RaftLog.committed = m.Commit
 		r.send(pb.Message{
 			MsgType: pb.MessageType_MsgHeartbeatResponse,
+			Term:    r.Term,
 			To:      m.From,
 			From:    r.id,
 		})
@@ -462,13 +457,14 @@ func (r *Raft) handlePropose(m pb.Message) error {
 func (r *Raft) appendEntry(entries ...pb.Entry) (accepted bool) {
 	lastIndex := r.RaftLog.LastIndex()
 	// 修正 RaftLog 为空的情况
+	li := int64(lastIndex)
 	if len(r.RaftLog.entries) == 0 {
-		lastIndex--
+		li = -1
 	}
 
 	for i := range entries {
 		entries[i].Term = r.Term
-		entries[i].Index = lastIndex + uint64(1+i)
+		entries[i].Index = uint64(li + int64(1+i))
 	}
 	lastIndex = r.RaftLog.append(entries...)
 	return true
@@ -479,14 +475,11 @@ func stepFuncLeader(r *Raft, m pb.Message) error {
 	// 收到另一个Leader的Append请求 -> 脑裂heal之后有可能发生
 	case pb.MessageType_MsgAppend:
 		r.handleAppendEntries(m)
-		return nil
 	// 收到Follower的Propose请求
 	case pb.MessageType_MsgPropose:
 		r.handlePropose(m)
-		return nil
 	// Leader发给自己 提醒要发送心跳了
 	case pb.MessageType_MsgBeat:
-		return nil
 	}
 	return nil
 }
@@ -564,6 +557,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 	// an unmatched index.
 	commit := minUint64(r.Prs[to].Match, r.RaftLog.committed)
 	m := pb.Message{
+		Term:    r.Term,
 		To:      to,
 		MsgType: pb.MessageType_MsgHeartbeat,
 		Commit:  commit,
