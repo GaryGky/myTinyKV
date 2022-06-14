@@ -185,3 +185,11 @@ func CountVotes(votes map[uint64]bool) (int, int) {
 	}
 	return sucCnt, failedCnt
 }
+
+func ConverEntryArrToEntryPntArr(entries []pb.Entry) []*pb.Entry {
+	res := make([]*pb.Entry, 0)
+	for _, entry := range entries {
+		res = append(res, &entry)
+	}
+	return res
+}

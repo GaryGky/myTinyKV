@@ -206,8 +206,32 @@ func newRaft(c *Config) *Raft {
 // sendAppend sends an AppendRPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
-	// Your Code Here (2A).
-	return false
+	return r.maySendAppend(to, false)
+}
+
+func (r *Raft) maySendAppend(to uint64, sendIfEmpty bool) bool {
+	pr := r.Prs[to]
+	m := pb.Message{}
+	m.To = to
+
+	term, errT := r.RaftLog.Term(pr.Next - 1)
+	entries := r.RaftLog.entries[pr.Next : r.RaftLog.LastIndex()+1]
+	if len(entries) == 0 && !sendIfEmpty {
+		return false
+	}
+
+	if errT != nil {
+		log.Fatalf("Raft.MaybeSendAppend Term Error: %v \n", errT)
+		return false
+	}
+
+	m.MsgType = pb.MessageType_MsgAppend
+	m.Index = pr.Next - 1
+	m.LogTerm = term
+	m.Entries = ConverEntryArrToEntryPntArr(entries)
+	m.Commit = r.RaftLog.committed
+	r.send(m)
+	return true
 }
 
 // tick advances the internal logical clock by a single tick.
