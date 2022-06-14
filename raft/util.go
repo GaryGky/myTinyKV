@@ -16,9 +16,9 @@ package raft
 
 import (
 	"fmt"
+	"github.com/pingcap-incubator/tinykv/log"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
 	"sort"
@@ -27,15 +27,29 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
-func min(a, b uint64) uint64 {
+func minUint64(a, b uint64) uint64 {
 	if a > b {
 		return b
 	}
 	return a
 }
 
-func max(a, b uint64) uint64 {
+func maxUint64(a, b uint64) uint64 {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt64(a, b int64) int64 {
+	if a < b {
 		return a
 	}
 	return b
@@ -129,30 +143,12 @@ func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
 
-func BuildElectionRequest(from, term uint64, peers []uint64, raftLog *RaftLog) (ans []pb.Message) {
-	lastIndex, committed, lastLogTerm := ParseRaftLogIndex(raftLog)
-
-	message := pb.Message{
-		MsgType: pb.MessageType_MsgRequestVote,
-		From:    from,
-		Term:    term,
-		Index:   lastIndex,
-		Commit:  committed,
-		LogTerm: lastLogTerm,
-	}
-	for _, peer := range peers {
-		message.To = peer
-		ans = append(ans, message)
-	}
-	return
-}
-
 func ParseRaftLogIndex(raftLog *RaftLog) (uint64, uint64, uint64) {
 	lastIndex := raftLog.LastIndex()
 	committed := raftLog.committed
 	lastLogTerm, err := raftLog.Term(lastIndex)
 	if err != nil {
-		log.Fatal("util.BuildElectionRequest Failed, err: ", err)
+		log.Warnf("util.ParseRaftLogIndex Failed, err: %v, lastLogTerm: %d", err, lastLogTerm)
 	}
 
 	return lastIndex, committed, lastLogTerm
@@ -186,10 +182,18 @@ func CountVotes(votes map[uint64]bool) (int, int) {
 	return sucCnt, failedCnt
 }
 
-func ConverEntryArrToEntryPntArr(entries []pb.Entry) []*pb.Entry {
+func ConvertEntryArrToEntryPntArr(entries []pb.Entry) []*pb.Entry {
 	res := make([]*pb.Entry, 0)
 	for _, entry := range entries {
 		res = append(res, &entry)
+	}
+	return res
+}
+
+func ConvertEntryPntArrToEntryArr(entries []*pb.Entry) []pb.Entry {
+	res := make([]pb.Entry, 0)
+	for _, entry := range entries {
+		res = append(res, *entry)
 	}
 	return res
 }

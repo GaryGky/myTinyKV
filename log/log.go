@@ -50,11 +50,12 @@ const (
 const FORMAT_TIME_DAY string = "20060102"
 const FORMAT_TIME_HOUR string = "2006010215"
 
-var _log *Logger = New()
+var _log = New()
 
 func init() {
 	SetFlags(Ldate | Ltime | Lshortfile)
 	SetHighlighting(runtime.GOOS != "windows")
+
 }
 
 func GlobalLogger() *log.Logger {
@@ -276,5 +277,6 @@ func NewLogger(w io.Writer, prefix string) *Logger {
 	} else {
 		level = LOG_LEVEL_INFO
 	}
-	return &Logger{_log: log.New(w, prefix, LstdFlags), level: level, highlighting: true}
+	logger := &Logger{_log: log.New(w, prefix, LstdFlags), level: level, highlighting: true}
+	return logger
 }

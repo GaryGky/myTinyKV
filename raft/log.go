@@ -49,7 +49,7 @@ type RaftLog struct {
 	// Everytime handling `Ready`, the unstable logs will be included.
 	stabled uint64
 
-	// all entries that have not yet compact. 尚未被回收 (GC) 的Log
+	// all entries that have not yet compact. 尚未被回收 (GC) 的 Log
 	entries []pb.Entry
 
 	// the incoming unstable snapshot, if any.
@@ -62,20 +62,9 @@ type RaftLog struct {
 // newLog returns log using the given storage. It recovers the log
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
-	// Your Code Here (2A).
-
 	hardState, _, err := storage.InitialState()
 	if err != nil {
 		log.Fatal("log.newLog failed, cannot initialize state: ", err)
-		return nil
-	}
-
-	/* TODO: 这里不是很确定 lo的取值, 因为不知道后续这里的entry需要怎么使用
-	目前的理解是 entries 就是DB未执行的指令 因此需要全部加载出来 */
-
-	lo, err := storage.FirstIndex()
-	if err != nil {
-		log.Fatal("log.newLog failed, cannot read firstIndex, ", err)
 		return nil
 	}
 
@@ -85,11 +74,16 @@ func newLog(storage Storage) *RaftLog {
 		return nil
 	}
 
-	entries, err := storage.Entries(lo, hi)
+	entries, err := storage.Entries(hi, hardState.Commit+1)
+	if err != nil {
+		log.Warning("log.newLog failed, cannot read entries, ", err)
+		entries = make([]pb.Entry, 0)
+	}
+
 	return &RaftLog{
 		storage:   storage,
 		committed: hardState.Commit,
-		applied:   0,                // Applied 是已经被DB执行的指令 所以在recover之后
+		applied:   hi,               // Applied 是已经被DB执行的指令 值为保存在Storage中最大的 Index
 		stabled:   hardState.Commit, // RaftNode recover 之后, Stabled这个状态应该就等于Commit
 		entries:   entries,
 	}
@@ -115,14 +109,79 @@ func (l *RaftLog) AllUnstableEntries() (entries []pb.Entry) {
 
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
-	// Your Code Here (2A).
-	return l.entries[len(l.entries)-1:][0].Index
+	if len(l.entries) == 0 {
+		return 0
+	}
+
+	// 兼容初始化entries长度为0的情况
+	start := maxInt64(0, int64(len(l.entries)-1))
+	return l.entries[start:][0].Index
 }
 
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
-	if i < 0 || i > uint64(len(l.entries)) {
-		return -1, ErrInvalidIndex
+	if i < 0 || len(l.entries) == 0 || i > uint64(len(l.entries)) {
+		return 0, ErrInvalidIndex
 	}
 	return l.entries[i].Term, nil
+}
+
+func (l *RaftLog) LastTerm() uint64 {
+	term, _ := l.Term(l.LastIndex())
+	return term
+}
+
+// helper functions
+func (l *RaftLog) append(entries ...pb.Entry) (lastIndex uint64) {
+	if len(entries) == 0 {
+		lastIndex = l.LastIndex()
+		return
+	}
+	after := entries[0].Index
+	switch {
+	// 直接Append到末尾
+	case after == l.LastIndex()+1:
+		l.entries = append(l.entries, entries...)
+	default:
+
+	}
+	return l.LastIndex()
+}
+
+func (l *RaftLog) maybeCommit(maxIndex, term uint64) bool {
+	if maxIndex > l.committed && l.zeroTermOnErrCompacted(l.Term(maxIndex)) == term {
+		l.commitTo(maxIndex)
+		return true
+	}
+	return false
+}
+func (l *RaftLog) zeroTermOnErrCompacted(t uint64, err error) uint64 {
+	if err == nil {
+		return t
+	}
+	if err == ErrCompacted {
+		return 0
+	}
+	log.Panicf("unexpected error (%v)", err)
+	return 0
+}
+
+func (l *RaftLog) commitTo(tocommit uint64) {
+	// never decrease commit
+	if l.committed < tocommit {
+		if l.LastIndex() < tocommit {
+			log.Panicf("tocommit(%d) is out of range [lastIndex(%d)]. Was the raft log corrupted, truncated, or lost?", tocommit, l.LastIndex())
+		}
+		l.committed = tocommit
+	}
+}
+
+func (l *RaftLog) appliedTo(i uint64) {
+	if i == 0 {
+		return
+	}
+	if l.committed < i || i < l.applied {
+		log.Panicf("applied(%d) is out of range [prevApplied(%d), committed(%d)]", i, l.applied, l.committed)
+	}
+	l.applied = i
 }
