@@ -129,8 +129,8 @@ func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
 
-func buildElectionRequest(from, term uint64, peers []uint64, raftLog *RaftLog) (ans []pb.Message) {
-	lastIndex, committed, lastLogTerm := parseRaftLogIndex(raftLog)
+func BuildElectionRequest(from, term uint64, peers []uint64, raftLog *RaftLog) (ans []pb.Message) {
+	lastIndex, committed, lastLogTerm := ParseRaftLogIndex(raftLog)
 
 	message := pb.Message{
 		MsgType: pb.MessageType_MsgRequestVote,
@@ -147,13 +147,41 @@ func buildElectionRequest(from, term uint64, peers []uint64, raftLog *RaftLog) (
 	return
 }
 
-func parseRaftLogIndex(raftLog *RaftLog) (uint64, uint64, uint64) {
+func ParseRaftLogIndex(raftLog *RaftLog) (uint64, uint64, uint64) {
 	lastIndex := raftLog.LastIndex()
 	committed := raftLog.committed
 	lastLogTerm, err := raftLog.Term(lastIndex)
 	if err != nil {
-		log.Fatal("util.buildElectionRequest Failed, err: ", err)
+		log.Fatal("util.BuildElectionRequest Failed, err: ", err)
 	}
 
 	return lastIndex, committed, lastLogTerm
+}
+
+func IsElectionSuccess(prs map[uint64]*Progress, votes map[uint64]bool) bool {
+	sucCnt, _ := CountVotes(votes)
+	if sucCnt >= (len(prs)+1)/2 {
+		return true
+	}
+	return false
+}
+
+func IsElectionFailed(prs map[uint64]*Progress, votes map[uint64]bool) bool {
+	_, failedCnt := CountVotes(votes)
+	if failedCnt >= (len(prs)+1)/2 {
+		return true
+	}
+	return false
+}
+
+func CountVotes(votes map[uint64]bool) (int, int) {
+	sucCnt, failedCnt := 0, 0
+	for _, vote := range votes {
+		if vote {
+			sucCnt++
+		} else {
+			failedCnt++
+		}
+	}
+	return sucCnt, failedCnt
 }

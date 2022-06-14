@@ -79,6 +79,7 @@ message Message {
     uint64 commit = 8; // RaftLog.committed
     Snapshot snapshot = 9;
     bool reject = 10; // VoteResponse 是否拒绝投票
+    uint64 hintedIndex = 11; // Follower 告知 Leader AppendEntry冲突的部分
 }
 
 // HardState contains the state of a node need to be persisted, including the current term, commit index

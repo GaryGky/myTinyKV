@@ -292,33 +292,12 @@ func (r *Raft) Step(m pb.Message) error {
 
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
-	switch r.State {
-	case StateFollower:
-		// 判断是否要接下这条AppendEntry 消息
-		if m.From == r.LeaderID {
-			r.RaftLog.entries = append(r.RaftLog.entries, *m.Entries[0])
-			lastIndex, committed, lastLogTerm := parseRaftLogIndex(r.RaftLog)
-			r.send(pb.Message{
-				MsgType: pb.MessageType_MsgAppendResponse,
-				To:      m.From,
-				From:    r.id,
-				Term:    r.Term,
-				LogTerm: lastLogTerm,
-				Index:   lastIndex,
-				Commit:  committed,
-			})
-		} else {
-			// TODO: Reject
-		}
-	case StateCandidate:
-		if m.Term > r.Term {
-			r.becomeFollower(m.Term, m.From)
-		}
-	case StateLeader:
-		if m.Term > r.Term {
-			r.becomeFollower(m.Term, m.From)
-		}
+	if m.Index < r.RaftLog.committed {
+		r.send(pb.Message{To: m.From, MsgType: pb.MessageType_MsgAppendResponse, Index: r.RaftLog.committed})
+		return
 	}
+
+	// TODO: Implement Lab2-b
 }
 
 // handleHeartbeat handle Heartbeat RPC request
@@ -356,7 +335,7 @@ func (r *Raft) removeNode(id uint64) {
 }
 
 func (r *Raft) handleRequestVote(m pb.Message) {
-	lastIndex, committed, lastLogTerm := parseRaftLogIndex(r.RaftLog)
+	lastIndex, committed, lastLogTerm := ParseRaftLogIndex(r.RaftLog)
 
 	resp := pb.Message{
 		MsgType: pb.MessageType_MsgRequestVoteResponse,
@@ -392,6 +371,12 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 func (r *Raft) handleHeartBeat(m pb.Message) error {
 	if r.LeaderID == m.From {
 		r.electionElapsed = 0
+		r.RaftLog.committed = m.Commit
+		r.send(pb.Message{
+			MsgType: pb.MessageType_MsgHeartbeatResponse,
+			To:      m.From,
+			From:    r.id,
+		})
 	}
 	return nil
 }
@@ -433,14 +418,27 @@ func stepFuncCandidate(r *Raft, m pb.Message) error {
 	switch m.MsgType {
 	// 自己投自己
 	case pb.MessageType_MsgHup:
-		return nil
-		// 有Leader已经当选
+		messages := BuildElectionRequest(r.id, r.Term, nodes(r), r.RaftLog)
+		for _, msg := range messages {
+			r.send(msg)
+		}
+	// 有Leader已经当选
 	case pb.MessageType_MsgAppend:
 		r.handleAppendEntries(m)
-		return nil
-		// 收到Follower的投票结果
+	// 收到Follower的投票结果
 	case pb.MessageType_MsgRequestVoteResponse:
-		return nil
+		switch m.Reject {
+		case true:
+			r.votes[m.From] = true
+			if IsElectionSuccess(r.Prs, r.votes) {
+				r.becomeLeader()
+			}
+		case false:
+			r.votes[m.From] = false
+			if IsElectionFailed(r.Prs, r.votes) {
+				r.becomeFollower(m.Term, None)
+			}
+		}
 	}
 	return nil
 }
@@ -449,19 +447,19 @@ func stepFuncFollower(r *Raft, m pb.Message) error {
 	switch m.MsgType {
 	// Follower 变成Candidate 并发起投票请求
 	case pb.MessageType_MsgHup:
-		r.msgs = buildElectionRequest(r.id, r.Term, nodes(r), r.RaftLog)
-		return nil
+		messages := BuildElectionRequest(r.id, r.Term, nodes(r), r.RaftLog)
+		for _, msg := range messages {
+			r.send(msg)
+		}
 	// 收到candidate的Vote请求
 	case pb.MessageType_MsgRequestVote:
 		r.handleRequestVote(m)
-		return nil
 	// 收到Leader的心跳请求
 	case pb.MessageType_MsgHeartbeat:
 		return r.handleHeartBeat(m)
 	// 收到 Leader 的AppendEntry请求
 	case pb.MessageType_MsgAppend:
 		r.handleAppendEntries(m)
-		return nil
 	}
 	return nil
 }
