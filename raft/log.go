@@ -17,6 +17,7 @@ package raft
 import (
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	"github.com/pkg/errors"
 )
 
 // RaftLog manage the log entries, its struct look like:
@@ -27,6 +28,9 @@ import (
 //
 // for simplify the RaftLog implement should manage all log entries
 // that not truncated
+
+var ErrInvalidIndex = errors.New("raft: index for entry is invalid")
+
 type RaftLog struct {
 	// storage contains all stable entries since the last snapshot.
 	storage Storage
@@ -100,24 +104,25 @@ func (l *RaftLog) maybeCompact() {
 
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
-	// Your Code Here (2A).
-	return nil
+	// committed 到最后都是UnStable的
+	return l.entries[l.committed:]
 }
 
 // AllUnstableEntries returns all the committed but not applied entries
 func (l *RaftLog) AllUnstableEntries() (entries []pb.Entry) {
-	// Your Code Here (2A).
-	return nil
+	return l.entries[l.applied : l.committed+1]
 }
 
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	return 0
+	return l.entries[len(l.entries)-1:][0].Index
 }
 
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
-	// Your Code Here (2A).
-	return 0, nil
+	if i < 0 || i > uint64(len(l.entries)) {
+		return -1, ErrInvalidIndex
+	}
+	return l.entries[i].Term, nil
 }
