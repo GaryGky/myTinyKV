@@ -197,3 +197,10 @@ func ConvertEntryPntArrToEntryArr(entries []*pb.Entry) []pb.Entry {
 	}
 	return res
 }
+
+func ClearVotes(votes map[uint64]bool) map[uint64]bool {
+	for pid := range votes {
+		delete(votes, pid)
+	}
+	return votes
+}

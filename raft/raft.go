@@ -278,10 +278,7 @@ func (r *Raft) reset(term uint64) {
 	// r.resetRandomizedElectionTimeout()
 
 	// r.abortLeaderTransfer()
-
-	for id := range r.votes {
-		r.votes[id] = false
-	}
+	r.votes = ClearVotes(r.votes)
 }
 
 // becomeFollower transform this peer's state to Follower
