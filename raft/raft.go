@@ -254,16 +254,13 @@ func (r *Raft) tick() {
 	default:
 		if r.electionElapsed >= r.electionTimeout {
 			r.electionElapsed = 0
-			electionMsg := pb.Message{
+			hup := pb.Message{
 				MsgType: pb.MessageType_MsgHup,
-				// To:                   0,  to everyone else
-				From: r.id,
-				Term: r.Term,
+				To:      r.id, // send MsgHup to self
+				From:    r.id,
+				Term:    r.Term,
 			}
-			for u := range r.Prs {
-				electionMsg.To = u
-				r.send(electionMsg)
-			}
+			r.send(hup)
 		}
 	}
 
@@ -412,7 +409,7 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 	if r.Term > m.Term {
 		resp.Reject = true
 	}
-	if r.Term == m.Term && r.Vote != m.From {
+	if r.Term == m.Term && r.Vote != None {
 		resp.Reject = true
 	}
 
@@ -489,18 +486,20 @@ func stepFuncCandidate(r *Raft, m pb.Message) error {
 	// 自己投自己
 	case pb.MessageType_MsgHup:
 		r.campaign(campaignElection)
+	case pb.MessageType_MsgRequestVote:
+		r.handleRequestVote(m)
 	// 有Leader已经当选
 	case pb.MessageType_MsgAppend:
 		r.handleAppendEntries(m)
 	// 收到Follower的投票结果
 	case pb.MessageType_MsgRequestVoteResponse:
 		switch m.Reject {
-		case true:
+		case false:
 			r.votes[m.From] = true
 			if IsElectionSuccess(r.Prs, r.votes) {
 				r.becomeLeader()
 			}
-		case false:
+		case true:
 			r.votes[m.From] = false
 			if IsElectionFailed(r.Prs, r.votes) {
 				r.becomeFollower(m.Term, None)
@@ -529,8 +528,8 @@ func stepFuncFollower(r *Raft, m pb.Message) error {
 }
 
 func (r *Raft) campaign(campaignType CampaignType) (ans []pb.Message) {
-	r.Term++
 	lastIndex, committed, lastLogTerm := ParseRaftLogIndex(r.RaftLog)
+	r.becomeCandidate()
 	message := pb.Message{
 		MsgType: pb.MessageType_MsgRequestVote,
 		From:    r.id,
