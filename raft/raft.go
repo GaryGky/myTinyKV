@@ -247,9 +247,7 @@ func (r *Raft) tick() {
 	case StateLeader:
 		if r.heartbeatElapsed >= r.heartbeatTimeout {
 			r.heartbeatElapsed = 0
-			for u := range r.Prs {
-				r.sendHeartbeat(u)
-			}
+			r.send(pb.Message{MsgType: pb.MessageType_MsgBeat, From: r.id, To: r.id})
 		}
 	default:
 		if r.electionElapsed >= r.electionTimeout {
@@ -293,8 +291,12 @@ func (r *Raft) becomeFollower(term uint64, leaderID uint64) {
 func (r *Raft) becomeCandidate() {
 	r.State = StateCandidate
 	r.stepFunc = stepFuncCandidate
-	r.Vote = r.id
 	r.reset(r.Term + 1)
+	r.Vote = r.id
+	r.votes[r.id] = true
+	if IsElectionSuccess(r.Prs, r.votes) {
+		r.becomeLeader()
+	}
 }
 
 // becomeLeader transform this peer's state to leader
@@ -348,7 +350,7 @@ func (r *Raft) send(m pb.Message) {
 	if m.From == None {
 		m.From = r.id
 	}
-	if r.id == m.To {
+	if r.id == m.To && IsLocalMsg(m.MsgType) {
 		r.Step(m)
 	} else {
 		r.msgs = append(r.msgs, m)
@@ -381,7 +383,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.send(pb.Message{To: m.From, MsgType: pb.MessageType_MsgAppendResponse, Index: r.RaftLog.committed, Reject: true})
 	}
 
-	if m.Term > r.Term {
+	if m.Term >= r.Term && r.id != m.From {
 		r.becomeFollower(m.Term, m.From)
 		r.send(pb.Message{From: r.id, To: m.From, MsgType: pb.MessageType_MsgAppendResponse})
 	}
@@ -406,7 +408,9 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 	if r.Term > m.Term {
 		resp.Reject = true
 	}
-	if r.Term == m.Term && r.Vote != None {
+
+	// Raft 已经投过票
+	if r.Vote != None && r.Vote != m.From {
 		resp.Reject = true
 	}
 
@@ -419,7 +423,6 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 	r.Vote = m.From
 	r.Term = m.Term
 
-	resp.Reject = false
 	r.send(resp)
 }
 
@@ -472,8 +475,14 @@ func stepFuncLeader(r *Raft, m pb.Message) error {
 	// 收到Follower的Propose请求
 	case pb.MessageType_MsgPropose:
 		r.handlePropose(m)
-	// Leader发给自己 提醒要发送心跳了
+	// Leader发给自己 提醒要发送心跳给Follower了
 	case pb.MessageType_MsgBeat:
+		for pid := range r.Prs {
+			if pid == r.id {
+				continue
+			}
+			r.sendHeartbeat(pid)
+		}
 	}
 	return nil
 }
@@ -535,7 +544,11 @@ func (r *Raft) campaign(campaignType CampaignType) (ans []pb.Message) {
 		Commit:  committed,
 		LogTerm: lastLogTerm,
 	}
+
 	for peer := range r.Prs {
+		if peer == r.id {
+			continue
+		}
 		message.To = peer
 		r.send(message)
 	}
