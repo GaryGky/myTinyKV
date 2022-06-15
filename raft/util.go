@@ -17,15 +17,26 @@ package raft
 import (
 	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
-
-	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	"sync"
+	"time"
 )
+
+type lockedRand struct {
+	mu   sync.Mutex
+	rand *rand.Rand
+}
+
+var globalRand = &lockedRand{
+	rand: rand.New(rand.NewSource(time.Now().UnixNano())),
+}
 
 func minUint64(a, b uint64) uint64 {
 	if a > b {

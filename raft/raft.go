@@ -41,7 +41,7 @@ var stmap = [...]string{
 }
 
 func (st StateType) String() string {
-	return stmap[uint64(st)]
+	return stmap[st]
 }
 
 // ErrProposalDropped is returned when the proposal is ignored by some cases,
@@ -159,11 +159,12 @@ type Raft struct {
 
 	// Timeout 表示经过多久触发某个事件
 	// Elapse 表示距离上一个TimeOut过去了多久
-
 	// heartbeat interval, should send
 	heartbeatTimeout int
 	// baseline of election interval
 	electionTimeout int
+	// randomized election timeout
+	randomizedElectionTimeout int
 	// number of ticks since it reached last heartbeatTimeout.
 	// only leader keeps heartbeatElapsed.
 	heartbeatElapsed int
@@ -208,22 +209,23 @@ func newRaft(c *Config) *Raft {
 		votes[node] = false
 		peers[node] = &Progress{
 			Match: 0,
-			Next:  0,
+			Next:  1,
 		}
 	}
 
 	raft := &Raft{
-		id:               c.ID,
-		Term:             hardState.Term,
-		Vote:             hardState.Vote,
-		RaftLog:          newLog(c.Storage),
-		Prs:              peers,
-		State:            StateFollower,
-		votes:            votes,
-		msgs:             make([]pb.Message, 0),
-		LeaderID:         None,
-		heartbeatTimeout: c.HeartbeatTick,
-		electionTimeout:  c.ElectionTick,
+		id:                        c.ID,
+		Term:                      hardState.Term,
+		Vote:                      hardState.Vote,
+		RaftLog:                   newLog(c.Storage),
+		Prs:                       peers,
+		State:                     StateFollower,
+		votes:                     votes,
+		msgs:                      make([]pb.Message, 0),
+		LeaderID:                  None,
+		heartbeatTimeout:          c.HeartbeatTick,
+		electionTimeout:           c.ElectionTick,
+		randomizedElectionTimeout: c.ElectionTick,
 	}
 	raft.becomeFollower(raft.Term, None)
 
@@ -250,7 +252,7 @@ func (r *Raft) tick() {
 			r.send(pb.Message{MsgType: pb.MessageType_MsgBeat, From: r.id, To: r.id})
 		}
 	default:
-		if r.electionElapsed >= r.electionTimeout {
+		if r.electionElapsed >= r.randomizedElectionTimeout {
 			r.electionElapsed = 0
 			hup := pb.Message{
 				MsgType: pb.MessageType_MsgHup,
@@ -259,6 +261,7 @@ func (r *Raft) tick() {
 				Term:    r.Term,
 			}
 			r.send(hup)
+			r.resetRandomizedElectionTimeout()
 		}
 	}
 
@@ -305,12 +308,23 @@ func (r *Raft) becomeLeader() {
 	r.stepFunc = stepFuncLeader
 	r.reset(r.Term)
 	// 发一条noop消息
-	r.broadcast(pb.Message{
+	noop := pb.Message{
 		MsgType: pb.MessageType_MsgAppend,
 		From:    r.id,
+		To:      r.id,
 		Term:    r.Term,
 		Index:   r.RaftLog.LastIndex(),
-	})
+		Entries: []*pb.Entry{
+			{
+				EntryType: pb.EntryType_EntryNormal,
+				Index:     r.RaftLog.LastIndex() + 1,
+				Term:      r.Term,
+				Data:      nil,
+			},
+		},
+	}
+	r.Step(noop)
+	r.broadcast(noop)
 }
 
 // sendAppend sends an AppendRPC with new entries (if any) and the
@@ -326,7 +340,7 @@ func (r *Raft) maySendAppend(to uint64, sendIfEmpty bool) bool {
 	m.To = to
 
 	term, errT := r.RaftLog.Term(pr.Next - 1)
-	entries := r.RaftLog.entries[pr.Next:r.RaftLog.LastIndex()]
+	entries := r.RaftLog.entries[pr.Next-1 : r.RaftLog.LastIndex()]
 	if len(entries) == 0 && !sendIfEmpty {
 		return false
 	}
@@ -361,14 +375,24 @@ func (r *Raft) send(m pb.Message) {
 func (r *Raft) broadcast(m pb.Message) {
 	for _, node := range nodes(r) {
 		m.To = node
+		if node == r.id {
+			continue
+		}
 		r.send(m)
 	}
 }
 
 func (r *Raft) broadcastAppend() {
 	for _, node := range nodes(r) {
+		if node == r.id {
+			continue
+		}
 		r.sendAppend(node)
 	}
+}
+
+func (r *Raft) resetRandomizedElectionTimeout() {
+	r.randomizedElectionTimeout = r.electionTimeout + globalRand.rand.Intn(r.electionTimeout)
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -453,15 +477,10 @@ func (r *Raft) handlePropose(m pb.Message) error {
 // helper function
 func (r *Raft) appendEntry(entries ...pb.Entry) (accepted bool) {
 	lastIndex := r.RaftLog.LastIndex()
-	// 修正 RaftLog 为空的情况
-	li := int64(lastIndex)
-	if len(r.RaftLog.entries) == 0 {
-		li = -1
-	}
 
 	for i := range entries {
 		entries[i].Term = r.Term
-		entries[i].Index = uint64(li + int64(1+i))
+		entries[i].Index = lastIndex + uint64(1+i)
 	}
 	lastIndex = r.RaftLog.append(entries...)
 	return true
