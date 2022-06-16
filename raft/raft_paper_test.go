@@ -416,9 +416,9 @@ func TestLeaderCommitEntry2AB(t *testing.T) {
 	if g := r.RaftLog.committed; g != li+1 {
 		t.Errorf("committed = %d, want %d", g, li+1)
 	}
-	wents := []pb.Entry{{Index: li + 1, Term: 1, Data: []byte("some data")}}
-	if g := r.RaftLog.AllUnstableEntries(); !reflect.DeepEqual(g, wents) {
-		t.Errorf("AllUnstableEntries = %+v, want %+v", g, wents)
+	wants := []pb.Entry{{Index: li + 1, Term: 1, Data: []byte("some data")}}
+	if g := r.RaftLog.AllUnstableEntries(); !reflect.DeepEqual(g, wants) {
+		t.Errorf("AllUnstableEntries = %+v, want %+v", g, wants)
 	}
 	msgs := r.readMessages()
 	sort.Sort(messageSlice(msgs))
