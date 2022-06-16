@@ -130,6 +130,18 @@ type Progress struct {
 	Match, Next uint64
 }
 
+// Return True if Updated
+// Return False if not Updated
+func (pr *Progress) maybeUpdate(n uint64) bool {
+	update := false
+	if pr.Match < n {
+		pr.Match = n
+		update = true
+	}
+	pr.Next = maxUint64(pr.Next, n+1)
+	return update
+}
+
 type stepFunc func(r *Raft, m pb.Message) error
 
 type Raft struct {
@@ -403,15 +415,24 @@ func (r *Raft) Step(m pb.Message) error {
 }
 
 func (r *Raft) handleAppendEntries(m pb.Message) {
+	// Follower will Reject Leader's Msg_Append if there're conflicts in the RaftLog
 	if m.Index < r.RaftLog.committed {
-		r.send(pb.Message{To: m.From, MsgType: pb.MessageType_MsgAppendResponse, Index: r.RaftLog.committed, Reject: true})
+		// TODO: Compute the hintedConflictIndex
+		hintedIndex := uint64(0)
+		r.send(pb.Message{To: m.From, MsgType: pb.MessageType_MsgAppendResponse, Index: r.RaftLog.committed, Reject: true, HintedIndex: hintedIndex})
 	}
 
+	// Candidate become Follower if receive a Msg_Append with higher Term
 	if m.Term >= r.Term && r.id != m.From {
 		r.becomeFollower(m.Term, m.From)
 		r.send(pb.Message{From: r.id, To: m.From, MsgType: pb.MessageType_MsgAppendResponse})
 	}
 
+	// From Raft Paper Figure.2, Follower Accept Msg_Append
+	// Append any new Entry into RaftLog
+	r.appendEntry(ConvertEntryPntArrToEntryArr(m.Entries)...)
+	// if LeaderCommitted > commitIndex then set commitIndex = min(leaderCommit, index of last new entry)
+	r.RaftLog.maybeCommit(minUint64(m.Commit, r.RaftLog.LastIndex()), m.Term)
 	return
 }
 
@@ -486,6 +507,36 @@ func (r *Raft) appendEntry(entries ...pb.Entry) (accepted bool) {
 	return true
 }
 
+// maybeCommit attempts to advance the commit index. Returns true if
+// the commit index changed (in which case the caller should call
+// r.bcastAppend).
+func (r *Raft) maybeCommit() bool {
+	maxCommittedIndexOfFollower := r.maxCommittedIndex()
+	return r.RaftLog.maybeCommit(maxCommittedIndexOfFollower, r.Term)
+}
+
+// Find the MaxMatchIndex which is received majority acks from Followers
+func (r *Raft) maxCommittedIndex() (maxCommittedIndex uint64) {
+	maxMatch := uint64(0)
+	for _, progress := range r.Prs {
+		if progress.Match > maxMatch {
+			maxMatch = progress.Match
+		}
+	}
+	for ; maxMatch > 0; maxMatch-- {
+		majorityCnt := 0
+		for _, progress := range r.Prs {
+			if progress.Match >= maxMatch {
+				majorityCnt++
+			}
+		}
+		if majorityCnt > (len(r.Prs)+1)/2 {
+			break
+		}
+	}
+	return maxMatch
+}
+
 func stepFuncLeader(r *Raft, m pb.Message) error {
 	switch m.MsgType {
 	// 收到另一个Leader的Append请求 -> 脑裂heal之后有可能发生
@@ -501,6 +552,13 @@ func stepFuncLeader(r *Raft, m pb.Message) error {
 				continue
 			}
 			r.sendHeartbeat(pid)
+		}
+	// Handle AppendResponse
+	case pb.MessageType_MsgAppendResponse:
+		progress := r.Prs[m.From]
+		progress.maybeUpdate(m.Index)
+		if r.maybeCommit() {
+			r.broadcastAppend()
 		}
 	}
 	return nil
