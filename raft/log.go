@@ -119,11 +119,12 @@ func (l *RaftLog) LastIndex() uint64 {
 }
 
 // Term return the term of the entry in the given index
-func (l *RaftLog) Term(i uint64) (uint64, error) {
-	if i < 0 || len(l.entries) == 0 || i > uint64(len(l.entries)) {
+// index 从1开始计算所以entries在取值的时候要减一
+func (l *RaftLog) Term(index uint64) (uint64, error) {
+	if index < 0 || len(l.entries) == 0 || index > uint64(len(l.entries)) {
 		return 0, ErrInvalidIndex
 	}
-	return l.entries[i].Term, nil
+	return l.entries[index-1].Term, nil
 }
 
 func (l *RaftLog) LastTerm() uint64 {

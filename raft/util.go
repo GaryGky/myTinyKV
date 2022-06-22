@@ -215,3 +215,7 @@ func ClearVotes(votes map[uint64]bool) map[uint64]bool {
 	}
 	return votes
 }
+
+func isNoopEntry(m pb.Message) bool {
+	return m.Entries[0].Data == nil
+}

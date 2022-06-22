@@ -319,24 +319,10 @@ func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 	r.stepFunc = stepFuncLeader
 	r.reset(r.Term)
-	// 发一条noop消息
-	noop := pb.Message{
-		MsgType: pb.MessageType_MsgAppend,
-		From:    r.id,
-		To:      r.id,
-		Term:    r.Term,
-		Index:   r.RaftLog.LastIndex(),
-		Entries: []*pb.Entry{
-			{
-				EntryType: pb.EntryType_EntryNormal,
-				Index:     r.RaftLog.LastIndex() + 1,
-				Term:      r.Term,
-				Data:      nil,
-			},
-		},
+	nopEntry := pb.Entry{Data: nil}
+	if !r.appendEntry(nopEntry) {
+		panic("Empty Entry was dropped")
 	}
-	r.Step(noop)
-	r.broadcast(noop)
 }
 
 // sendAppend sends an AppendRPC with new entries (if any) and the
@@ -426,6 +412,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	if m.Term >= r.Term && r.id != m.From {
 		r.becomeFollower(m.Term, m.From)
 		r.send(pb.Message{From: r.id, To: m.From, MsgType: pb.MessageType_MsgAppendResponse})
+		return
 	}
 
 	// From Raft Paper Figure.2, Follower Accept Msg_Append
@@ -433,6 +420,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	r.appendEntry(ConvertEntryPntArrToEntryArr(m.Entries)...)
 	// if LeaderCommitted > commitIndex then set commitIndex = min(leaderCommit, index of last new entry)
 	r.RaftLog.maybeCommit(minUint64(m.Commit, r.RaftLog.LastIndex()), m.Term)
+	r.send(pb.Message{From: r.id, To: m.From, MsgType: pb.MessageType_MsgAppendResponse, Term: r.Term})
 	return
 }
 
@@ -518,19 +506,23 @@ func (r *Raft) maybeCommit() bool {
 // Find the MaxMatchIndex which is received majority acks from Followers
 func (r *Raft) maxCommittedIndex() (maxCommittedIndex uint64) {
 	maxMatch := uint64(0)
-	for _, progress := range r.Prs {
+	for id, progress := range r.Prs {
+		if id == r.id {
+			continue
+		}
 		if progress.Match > maxMatch {
 			maxMatch = progress.Match
 		}
 	}
 	for ; maxMatch > 0; maxMatch-- {
-		majorityCnt := 0
+		// majority + 1 是为了计算Leader自己投给自己的票
+		majorityCnt := 1
 		for _, progress := range r.Prs {
 			if progress.Match >= maxMatch {
 				majorityCnt++
 			}
 		}
-		if majorityCnt > (len(r.Prs)+1)/2 {
+		if majorityCnt >= (len(r.Prs)+1)/2 {
 			break
 		}
 	}
